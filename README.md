@@ -1,73 +1,115 @@
-# Welcome to your Lovable project
+# Gabinete do Povo
 
-## Project info
+Sistema de automação de tarefas baseado em formulários para a Prefeitura de Maricá.
 
-**URL**: https://lovable.dev/projects/57c3093a-4eb6-473a-b69f-49ee06336185
+## 🎯 Objetivo
 
-## How can I edit this code?
+O Gabinete do Povo é uma plataforma que automatiza a criação e o gerenciamento de tarefas com base nas respostas de formulários, permitindo um fluxo de trabalho eficiente e configurável.
 
-There are several ways of editing your application.
+## ✨ Funcionalidades
 
-**Use Lovable**
+### 🔐 Autenticação
+- Sistema de login seguro
+- Rotas protegidas
+- Gerenciamento de sessão
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/57c3093a-4eb6-473a-b69f-49ee06336185) and start prompting.
+### 📋 Gerenciamento de Formulários
+- Visualização de formulários sincronizados
+- Integração com API externa
+- Sincronização automática de dados
 
-Changes made via Lovable will be committed automatically to this repo.
+### 🔄 Sincronização
+- Conecta com API externa (marica_form_flow)
+- Sincronização em tempo real
+- Recarregamento automático após sincronização
 
-**Use your preferred IDE**
+### 📊 Dashboard
+- Estatísticas de formulários
+- Gráficos de tarefas por setor
+- Relatórios de prioridade
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### ⚙️ Configuração
+- Configuração de API externa
+- Mapeamento de setores
+- Regras de automação
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+## 🚀 Tecnologias
 
-Follow these steps:
+### Frontend
+- **React 18** - Biblioteca de interface
+- **TypeScript** - Tipagem estática
+- **Vite** - Build tool
+- **Tailwind CSS** - Estilização
+- **Shadcn/ui** - Componentes de UI
+- **React Router** - Roteamento
+- **React Query** - Gerenciamento de estado
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+### Backend
+- **Node.js** - Runtime
+- **Express.js** - Framework web
+- **TypeScript** - Tipagem estática
+- **Prisma** - ORM
+- **PostgreSQL** - Banco de dados
+- **JWT** - Autenticação
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+## 📦 Instalação
 
-# Step 3: Install the necessary dependencies.
-npm i
+### Pré-requisitos
+- Node.js 18+
+- PostgreSQL 13+
+- Git
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+### Backend
+```bash
+cd backend
+npm install
+cp env.example .env
+# Configure as variáveis no .env
+npx prisma migrate dev
+npx prisma db seed
 npm run dev
 ```
 
-**Edit a file directly in GitHub**
+### Frontend
+```bash
+npm install
+npm run dev
+```
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+## 🔧 Configuração
 
-**Use GitHub Codespaces**
+### Variáveis de Ambiente (Backend)
+```env
+DATABASE_URL="postgresql://usuario:senha@localhost:5432/gabinete_do_povo"
+JWT_SECRET="seu_jwt_secret_aqui"
+EXTERNAL_API_URL="http://localhost:3001"
+PORT=3002
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+### API Externa
+Configure a URL da API externa no sistema para sincronização de formulários.
 
-## What technologies are used for this project?
+## 📱 Uso
 
-This project is built with:
+1. **Login**: Acesse o sistema com suas credenciais
+2. **Configurar API**: Configure a conexão com a API externa
+3. **Sincronizar**: Sincronize os formulários da API externa
+4. **Gerenciar**: Visualize e gerencie os formulários sincronizados
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+## 🎨 Design
 
-## How can I deploy this project?
+- **Cores**: Vermelho e Branco (identidade visual institucional)
+- **Layout**: Responsivo e moderno
+- **Acessibilidade**: Seguindo padrões WCAG
 
-Simply open [Lovable](https://lovable.dev/projects/57c3093a-4eb6-473a-b69f-49ee06336185) and click on Share -> Publish.
+## 📄 Licença
 
-## Can I connect a custom domain to my Lovable project?
+Este projeto é propriedade da Prefeitura de Maricá.
 
-Yes, you can!
+## 👥 Desenvolvimento
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+Sistema desenvolvido para automatizar processos administrativos e melhorar a eficiência do atendimento ao cidadão.
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+---
+
+**Prefeitura de Maricá - Gabinete do Povo** 🏛️
