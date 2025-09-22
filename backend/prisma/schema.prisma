@@ -1,0 +1,192 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  password  String
+  role      UserRole @default(USER)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos
+  syncConfigs   SyncConfig[]
+  forms         Form[]
+  tasks         Task[]
+  notifications Notification[]
+
+  @@map("users")
+}
+
+model SyncConfig {
+  id              String   @id @default(cuid())
+  userId          String
+  apiEndpoint     String
+  apiKey          String?
+  autoSync        Boolean  @default(false)
+  syncInterval    Int      @default(30) // em minutos
+  lastSyncAt      DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relacionamentos
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sync_configs")
+}
+
+model Form {
+  id          String      @id @default(cuid())
+  externalId  String      @unique // ID do formulário na API externa
+  title       String
+  description String?
+  status      FormStatus  @default(ACTIVE)
+  category    String?
+  instructions String?
+  userId      String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relacionamentos
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  questions FormQuestion[]
+  responses FormResponse[]
+  tasks    Task[]
+
+  @@map("forms")
+}
+
+model FormQuestion {
+  id          String            @id @default(cuid())
+  formId      String
+  externalId  String            // ID da pergunta na API externa
+  title       String
+  description String?
+  type        QuestionType
+  required    Boolean           @default(false)
+  order       Int
+  options     Json?             // Opções para perguntas de múltipla escolha
+  validation  Json?             // Regras de validação
+  conditional Json?             // Lógica condicional
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  // Relacionamentos
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@map("form_questions")
+}
+
+model FormResponse {
+  id        String   @id @default(cuid())
+  formId    String
+  answers   Json     // Respostas do formulário
+  submittedAt DateTime @default(now())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relacionamentos
+  form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@map("form_responses")
+}
+
+model Task {
+  id          String      @id @default(cuid())
+  formId      String?
+  title       String
+  description String?
+  status      TaskStatus  @default(PENDING)
+  priority    TaskPriority @default(MEDIUM)
+  dueDate     DateTime?
+  completedAt DateTime?
+  userId      String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relacionamentos
+  form Form? @relation(fields: [formId], references: [id], onDelete: SetNull)
+  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("tasks")
+}
+
+model Notification {
+  id        String             @id @default(cuid())
+  title     String
+  message   String
+  type      NotificationType
+  isRead    Boolean            @default(false)
+  userId    String?
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  // Relacionamentos
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// Enums
+enum UserRole {
+  ADMIN
+  USER
+}
+
+enum FormStatus {
+  ACTIVE
+  INACTIVE
+  DRAFT
+}
+
+enum QuestionType {
+  TEXT
+  TEXTAREA
+  EMAIL
+  PHONE
+  NUMBER
+  DATE
+  TIME
+  DATETIME
+  SELECT
+  MULTISELECT
+  RADIO
+  CHECKBOX
+  FILE
+  RATING
+  SCALE
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  ERROR
+  SUCCESS
+}
+

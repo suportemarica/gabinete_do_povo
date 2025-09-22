@@ -1,4 +1,4 @@
-import { Bell, Settings, User, Menu } from 'lucide-react';
+import { Bell, Settings, User, Menu, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import {
@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useGabineteData } from '@/hooks/useGabineteData';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface HeaderProps {
   onToggleSidebar: () => void;
@@ -17,7 +18,12 @@ interface HeaderProps {
 
 export function Header({ onToggleSidebar }: HeaderProps) {
   const { notifications, markNotificationAsRead } = useGabineteData();
+  const { user, logout } = useAuth();
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  const handleLogout = () => {
+    logout();
+  };
 
   return (
     <header className="bg-card border-b border-border px-4 py-3 flex items-center justify-between">
@@ -98,12 +104,25 @@ export function Header({ onToggleSidebar }: HeaderProps) {
         {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <User className="h-5 w-5" />
+            <Button variant="ghost" className="flex items-center gap-2 px-3">
+              <div className="h-8 w-8 bg-red-600 rounded-full flex items-center justify-center">
+                <span className="text-white font-medium text-sm">
+                  {user?.name?.charAt(0)?.toUpperCase() || 'U'}
+                </span>
+              </div>
+              <div className="hidden sm:block text-left">
+                <p className="text-sm font-medium">{user?.name || 'Usuário'}</p>
+                <p className="text-xs text-muted-foreground">{user?.email}</p>
+              </div>
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuLabel>Minha Conta</DropdownMenuLabel>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuLabel>
+              <div className="flex flex-col space-y-1">
+                <p className="text-sm font-medium">{user?.name || 'Usuário'}</p>
+                <p className="text-xs text-muted-foreground">{user?.email}</p>
+              </div>
+            </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem>
               <User className="mr-2 h-4 w-4" />
@@ -112,6 +131,11 @@ export function Header({ onToggleSidebar }: HeaderProps) {
             <DropdownMenuItem>
               <Settings className="mr-2 h-4 w-4" />
               <span>Configurações</span>
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleLogout} className="text-red-600 focus:text-red-600">
+              <LogOut className="mr-2 h-4 w-4" />
+              <span>Sair</span>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>

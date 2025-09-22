@@ -4,6 +4,8 @@ import { Sidebar } from '@/components/layout/Sidebar';
 import { Dashboard } from '@/pages/Dashboard';
 import { Tasks } from '@/pages/Tasks';
 import { Automation } from '@/pages/Automation';
+import { Forms } from '@/pages/Forms';
+import { Sectors } from '@/pages/Sectors';
 
 const Index = () => {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -17,6 +19,10 @@ const Index = () => {
         return <Tasks />;
       case 'automation':
         return <Automation />;
+      case 'forms':
+        return <Forms />;
+      case 'sectors':
+        return <Sectors />;
       default:
         return <Dashboard />;
     }

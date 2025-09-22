@@ -1,0 +1,81 @@
+version: '3.8'
+
+services:
+  # Banco de dados PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: gabinete-postgres
+    environment:
+      POSTGRES_DB: gabinete_do_povo
+      POSTGRES_USER: gabinete
+      POSTGRES_PASSWORD: gabinete123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - gabinete-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gabinete -d gabinete_do_povo"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Aplicação Backend
+  backend:
+    build: .
+    container_name: gabinete-backend
+    environment:
+      DATABASE_URL: "postgresql://gabinete:gabinete123@postgres:5432/gabinete_do_povo?schema=public"
+      JWT_SECRET: "your-super-secret-jwt-key-here"
+      JWT_EXPIRES_IN: "24h"
+      PORT: 3002
+      NODE_ENV: "development"
+      CORS_ORIGIN: "http://localhost:5173"
+      EXTERNAL_API_URL: "http://localhost:3002/api"
+      EXTERNAL_API_KEY: ""
+      DEFAULT_SYNC_INTERVAL: "30"
+      DEFAULT_AUTO_SYNC: "false"
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gabinete-network
+    volumes:
+      - ./src:/app/src
+      - ./prisma:/app/prisma
+    command: >
+      sh -c "
+        npx prisma migrate deploy &&
+        npx prisma generate &&
+        npm run seed &&
+        npm run dev
+      "
+
+  # pgAdmin para gerenciar o banco
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: gabinete-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@gabinete.com
+      PGADMIN_DEFAULT_PASSWORD: admin123
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres
+    networks:
+      - gabinete-network
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  postgres_data:
+  pgadmin_data:
+
+networks:
+  gabinete-network:
+    driver: bridge
+
