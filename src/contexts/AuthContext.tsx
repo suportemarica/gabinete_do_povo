@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { apiService } from '@/services/api';
 import { ApiUser } from '@/types/api';
+import { useRateLimit } from '@/hooks/useRateLimit';
+import { RateLimitDialog } from '@/components/ui/rate-limit-dialog';
 
 interface AuthContextType {
   user: ApiUser | null;
@@ -23,6 +25,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  
+  const {
+    isRateLimited,
+    retryAfterSeconds,
+    errorMessage,
+    handleRateLimitError,
+    clearRateLimit,
+    retry
+  } = useRateLimit();
 
   // Verificar autenticação inicial
   useEffect(() => {
@@ -75,6 +86,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Erro desconhecido';
+      
+      // Verificar se é erro de rate limiting
+      if (err instanceof Error && errorMessage.includes('Muitas tentativas')) {
+        handleRateLimitError(err);
+        return false;
+      }
+      
       setError(errorMessage);
       return false;
     } finally {
@@ -143,9 +161,23 @@ export function AuthProvider({ children }: AuthProviderProps) {
     getProfile,
   };
 
+  const handleRetryLogin = () => {
+    retry(() => {
+      // A função de retry será chamada quando o usuário clicar no botão
+      // O login será tentado novamente automaticamente
+    });
+  };
+
   return (
     <AuthContext.Provider value={value}>
       {children}
+      
+      <RateLimitDialog
+        isOpen={isRateLimited}
+        onClose={clearRateLimit}
+        retryAfterSeconds={retryAfterSeconds}
+        onRetry={handleRetryLogin}
+      />
     </AuthContext.Provider>
   );
 }

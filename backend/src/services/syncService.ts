@@ -1,37 +1,26 @@
-import { PrismaClient } from '@prisma/client';
-import { ExternalApiService, ExternalApiCredentials } from './externalApiService';
+import { prisma } from '../index';
+import { getExternalApiService } from './externalApiService';
+import { getAutomationService } from './automationService';
 import { ApiForm, ApiFormQuestion } from '../types';
-
-const prisma = new PrismaClient();
 
 export interface SyncResult {
   success: boolean;
   syncedForms: number;
-  syncedQuestions: number;
+  updatedForms: number;
+  createdForms: number;
   errors: string[];
   duration: number;
-}
-
-export interface SyncOptions {
-  userId: string;
-  credentials: ExternalApiCredentials;
-  apiEndpoint: string;
-  apiKey?: string;
-  forceSync?: boolean; // Forçar sincronização mesmo se já foi feita recentemente
+  processedResponses: number;
+  createdTasks: number;
+  sentNotifications: number;
 }
 
 export class SyncService {
-  private externalApi: ExternalApiService;
-
-  constructor(externalApi: ExternalApiService) {
-    this.externalApi = externalApi;
-  }
-
-  // Mapear status da API externa para FormStatus do Prisma
-  private mapFormStatus(externalStatus: string | undefined): 'ACTIVE' | 'INACTIVE' | 'DRAFT' {
-    if (!externalStatus) return 'ACTIVE';
-    
-    const statusMap: Record<string, 'ACTIVE' | 'INACTIVE' | 'DRAFT'> = {
+  /**
+   * Mapeia status da API externa para FormStatus do Prisma
+   */
+  private mapFormStatus(apiStatus: string): 'ACTIVE' | 'INACTIVE' | 'DRAFT' {
+    const statusMap: { [key: string]: 'ACTIVE' | 'INACTIVE' | 'DRAFT' } = {
       'active': 'ACTIVE',
       'inactive': 'INACTIVE',
       'draft': 'DRAFT',
@@ -40,14 +29,14 @@ export class SyncService {
       'DRAFT': 'DRAFT',
     };
     
-    return statusMap[externalStatus.toLowerCase()] || 'ACTIVE';
+    return statusMap[apiStatus.toLowerCase()] || 'ACTIVE';
   }
 
-  // Mapear tipo de pergunta da API externa para QuestionType do Prisma
-  private mapQuestionType(externalType: string | undefined): 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'DATE' | 'TIME' | 'DATETIME' | 'SELECT' | 'MULTISELECT' | 'RADIO' | 'CHECKBOX' | 'FILE' | 'RATING' {
-    if (!externalType) return 'TEXT';
-    
-    const typeMap: Record<string, 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'DATE' | 'TIME' | 'DATETIME' | 'SELECT' | 'MULTISELECT' | 'RADIO' | 'CHECKBOX' | 'FILE' | 'RATING'> = {
+  /**
+   * Mapeia tipo de pergunta da API externa para QuestionType do Prisma
+   */
+  private mapQuestionType(apiType: string): 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'DATE' | 'TIME' | 'DATETIME' | 'SELECT' | 'MULTISELECT' | 'RADIO' | 'CHECKBOX' | 'FILE' | 'RATING' | 'SCALE' {
+    const typeMap: { [key: string]: 'TEXT' | 'TEXTAREA' | 'EMAIL' | 'PHONE' | 'NUMBER' | 'DATE' | 'TIME' | 'DATETIME' | 'SELECT' | 'MULTISELECT' | 'RADIO' | 'CHECKBOX' | 'FILE' | 'RATING' | 'SCALE' } = {
       'text': 'TEXT',
       'textarea': 'TEXTAREA',
       'email': 'EMAIL',
@@ -62,8 +51,8 @@ export class SyncService {
       'checkbox': 'CHECKBOX',
       'file': 'FILE',
       'rating': 'RATING',
-      'cep': 'TEXT', // CEP é tratado como texto
-      'cpf': 'TEXT', // CPF é tratado como texto
+      'scale': 'SCALE',
+      // Valores em maiúsculo também
       'TEXT': 'TEXT',
       'TEXTAREA': 'TEXTAREA',
       'EMAIL': 'EMAIL',
@@ -78,266 +67,336 @@ export class SyncService {
       'CHECKBOX': 'CHECKBOX',
       'FILE': 'FILE',
       'RATING': 'RATING',
+      'SCALE': 'SCALE',
     };
     
-    return typeMap[externalType.toLowerCase()] || 'TEXT';
+    return typeMap[apiType.toLowerCase()] || 'TEXT';
   }
 
-  // Sincronizar formulários da API externa para o banco local
-  async syncForms(options: SyncOptions): Promise<SyncResult> {
+  /**
+   * Sincroniza formulários da API externa e processa automações
+   */
+  async syncForms(userId: string, credentials?: { email: string; password: string }): Promise<SyncResult> {
     const startTime = Date.now();
-    const errors: string[] = [];
-    let syncedForms = 0;
-    let syncedQuestions = 0;
+    const result: SyncResult = {
+      success: true,
+      syncedForms: 0,
+      updatedForms: 0,
+      createdForms: 0,
+      errors: [],
+      duration: 0,
+      processedResponses: 0,
+      createdTasks: 0,
+      sentNotifications: 0,
+    };
 
     try {
-      console.log('🔄 Iniciando sincronização de formulários...');
+      // Obter configuração de sincronização do usuário
+      const syncConfig = await prisma.syncConfig.findFirst({
+        where: { userId, isActive: true },
+      });
 
-      // 1. Autenticar na API externa
-      console.log('🔐 Autenticando na API externa...');
-      const authResult = await this.externalApi.authenticate(options.credentials);
-      
+      if (!syncConfig) {
+        throw new Error('Configuração de sincronização não encontrada');
+      }
+
+      // Inicializar serviço da API externa
+      const externalApiService = getExternalApiService({
+        baseUrl: syncConfig.apiEndpoint,
+        apiKey: syncConfig.apiKey,
+        timeout: 30000,
+      });
+
+      // Autenticar na API externa
+      const authResult = await externalApiService.authenticate({
+        email: credentials?.email || process.env.EXTERNAL_API_EMAIL || '',
+        password: credentials?.password || process.env.EXTERNAL_API_PASSWORD || '',
+      });
+
       if (!authResult.success) {
         throw new Error(`Falha na autenticação: ${authResult.error}`);
       }
 
-      console.log('✅ Autenticado com sucesso na API externa');
-
-      // 2. Buscar formulários da API externa
-      console.log('📋 Buscando formulários da API externa...');
-      const formsResult = await this.externalApi.syncForms();
-      
-      if (!formsResult.success) {
-        throw new Error(`Falha ao buscar formulários: ${formsResult.error}`);
+      // Buscar formulários da API externa
+      const formsResult = await externalApiService.syncForms();
+      if (!formsResult.success || !formsResult.data) {
+        throw new Error(`Erro ao buscar formulários: ${formsResult.error}`);
       }
 
-      const externalForms = formsResult.data?.forms || [];
-      console.log(`📊 Encontrados ${externalForms.length} formulários na API externa`);
+      const externalForms = formsResult.data.forms;
+      result.syncedForms = externalForms.length;
 
-      // 3. Sincronizar cada formulário
+      // Processar cada formulário
       for (const externalForm of externalForms) {
         try {
-          const syncResult = await this.syncSingleForm(externalForm, options.userId);
-          syncedForms += syncResult.forms;
-          syncedQuestions += syncResult.questions;
-        } catch (error: any) {
-          const errorMsg = `Erro ao sincronizar formulário ${externalForm.title}: ${error.message}`;
-          console.error('❌', errorMsg);
-          errors.push(errorMsg);
+          await this.syncForm(externalForm, userId);
+          result.createdForms++;
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+          result.errors.push(`Formulário ${externalForm.id}: ${errorMessage}`);
         }
       }
 
-      // 4. Atualizar configuração de sincronização
-      await this.updateSyncConfig(options);
+      // Processar automações para formulários existentes
+      const automationService = getAutomationService();
+      const forms = await prisma.form.findMany({
+        where: { userId },
+        include: {
+          responses: {
+            where: {
+              submittedAt: {
+                gte: syncConfig.lastSyncAt || new Date(0),
+              },
+            },
+          },
+        },
+      });
 
-      const duration = Date.now() - startTime;
-      console.log(`✅ Sincronização concluída em ${duration}ms`);
+      for (const form of forms) {
+        if (form.responses.length > 0) {
+          try {
+            const automationResult = await automationService.processAllPendingResponses(form.id);
+            result.processedResponses += automationResult.executedRules;
+            result.createdTasks += automationResult.createdTasks;
+            result.sentNotifications += automationResult.sentNotifications;
+            result.errors.push(...automationResult.errors);
+          } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+            result.errors.push(`Automação para formulário ${form.id}: ${errorMessage}`);
+          }
+        }
+      }
 
-      return {
-        success: errors.length === 0,
-        syncedForms,
-        syncedQuestions,
-        errors,
-        duration,
-      };
+      // Atualizar última sincronização
+      await prisma.syncConfig.update({
+        where: { id: syncConfig.id },
+        data: { lastSyncAt: new Date() },
+      });
 
-    } catch (error: any) {
-      const duration = Date.now() - startTime;
-      console.error('❌ Erro na sincronização:', error);
-      
-      return {
-        success: false,
-        syncedForms,
-        syncedQuestions,
-        errors: [...errors, error.message],
-        duration,
-      };
+      result.duration = Date.now() - startTime;
+      result.success = result.errors.length === 0;
+
+    } catch (error) {
+      result.success = false;
+      result.duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      result.errors.push(errorMessage);
     }
+
+    return result;
   }
 
-  // Sincronizar um formulário específico
-  private async syncSingleForm(externalForm: ApiForm, userId: string): Promise<{ forms: number; questions: number }> {
-    let formsCount = 0;
-    let questionsCount = 0;
-
+  /**
+   * Sincroniza um formulário específico
+   */
+  private async syncForm(externalForm: ApiForm, userId: string): Promise<void> {
     // Verificar se o formulário já existe
-    const existingForm = await prisma.form.findFirst({
-      where: {
-        externalId: externalForm.id,
-        userId,
-      },
+    const existingForm = await prisma.form.findUnique({
+      where: { externalId: externalForm.id },
     });
-
-    let formData: any;
 
     if (existingForm) {
       // Atualizar formulário existente
-      formData = await prisma.form.update({
+      await prisma.form.update({
         where: { id: existingForm.id },
         data: {
           title: externalForm.title,
           description: externalForm.description,
-          status: this.mapFormStatus(externalForm.status),
+          status: this.mapFormStatus(externalForm.status || 'active'),
           category: externalForm.category,
           instructions: externalForm.instructions,
           updatedAt: new Date(),
         },
       });
-      console.log(`🔄 Formulário atualizado: ${formData.title}`);
+
+      // Sincronizar perguntas
+      if (externalForm.questions && externalForm.questions.length > 0) {
+        await this.syncFormQuestions(existingForm.id, externalForm.questions);
+      }
     } else {
       // Criar novo formulário
-      formData = await prisma.form.create({
+      const newForm = await prisma.form.create({
         data: {
           externalId: externalForm.id,
           title: externalForm.title,
           description: externalForm.description,
-          status: this.mapFormStatus(externalForm.status),
+          status: this.mapFormStatus(externalForm.status || 'active'),
           category: externalForm.category,
           instructions: externalForm.instructions,
           userId,
         },
       });
-      console.log(`➕ Formulário criado: ${formData.title}`);
+
+      // Sincronizar perguntas
+      if (externalForm.questions && externalForm.questions.length > 0) {
+        await this.syncFormQuestions(newForm.id, externalForm.questions);
+      }
     }
+  }
 
-    formsCount = 1;
+  /**
+   * Sincroniza as perguntas de um formulário
+   */
+  private async syncFormQuestions(formId: string, questions: ApiFormQuestion[]): Promise<void> {
+    // Deletar perguntas existentes
+    await prisma.formQuestion.deleteMany({
+      where: { formId },
+    });
 
-    // Sincronizar perguntas do formulário
-    if (externalForm.questions && externalForm.questions.length > 0) {
-      // Remover perguntas antigas
-      await prisma.formQuestion.deleteMany({
-        where: { formId: formData.id },
-      });
-
-      // Criar novas perguntas
-        const questionsData = externalForm.questions.map((question: ApiFormQuestion, index: number) => ({
-          formId: formData.id,
+    // Criar novas perguntas
+    for (const question of questions) {
+      await prisma.formQuestion.create({
+        data: {
+          formId,
           externalId: question.id,
           title: question.title,
           description: question.description,
           type: this.mapQuestionType(question.type),
           required: question.required || false,
-          order: question.order || index + 1,
-          options: question.options ? JSON.stringify(question.options) : null,
-          validation: question.validation ? JSON.stringify(question.validation) : null,
-          conditional: question.conditional ? JSON.stringify(question.conditional) : null,
-        }));
-
-      await prisma.formQuestion.createMany({
-        data: questionsData,
-      });
-
-      questionsCount = questionsData.length;
-      console.log(`📝 ${questionsCount} perguntas sincronizadas para: ${formData.title}`);
-    }
-
-    return { forms: formsCount, questions: questionsCount };
-  }
-
-  // Atualizar configuração de sincronização
-  private async updateSyncConfig(options: SyncOptions): Promise<void> {
-    try {
-      await prisma.syncConfig.upsert({
-        where: {
-          id: `sync-${options.userId}`,
-        },
-        update: {
-          apiEndpoint: options.apiEndpoint,
-          apiKey: options.apiKey,
-          lastSyncAt: new Date(),
-          updatedAt: new Date(),
-        },
-        create: {
-          userId: options.userId,
-          apiEndpoint: options.apiEndpoint,
-          apiKey: options.apiKey,
-          autoSync: false,
-          syncInterval: 30,
-          lastSyncAt: new Date(),
-          isActive: true,
+          order: question.order || 0,
+          options: question.options || null,
+          validation: question.validation || null,
+          conditional: question.conditional || null,
         },
       });
-    } catch (error) {
-      console.error('Erro ao atualizar configuração de sincronização:', error);
     }
   }
 
-  // Verificar se precisa sincronizar (baseado no último sync)
-  async shouldSync(userId: string, syncIntervalMinutes: number = 30): Promise<boolean> {
+  /**
+   * Sincroniza respostas de um formulário específico
+   */
+  async syncFormResponses(formId: string, userId: string, credentials?: { email: string; password: string }): Promise<SyncResult> {
+    const startTime = Date.now();
+    const result: SyncResult = {
+      success: true,
+      syncedForms: 0,
+      updatedForms: 0,
+      createdForms: 0,
+      errors: [],
+      duration: 0,
+      processedResponses: 0,
+      createdTasks: 0,
+      sentNotifications: 0,
+    };
+
     try {
-      const syncConfig = await prisma.syncConfig.findFirst({
-        where: {
-          userId,
-          isActive: true,
-        },
+      // Verificar se o formulário pertence ao usuário
+      const form = await prisma.form.findFirst({
+        where: { id: formId, userId },
       });
 
-      if (!syncConfig || !syncConfig.lastSyncAt) {
-        return true;
+      if (!form) {
+        throw new Error('Formulário não encontrado');
       }
 
-      const lastSync = syncConfig.lastSyncAt.getTime();
-      const now = Date.now();
-      const intervalMs = syncIntervalMinutes * 60 * 1000;
-
-      return (now - lastSync) >= intervalMs;
-    } catch (error) {
-      console.error('Erro ao verificar necessidade de sincronização:', error);
-      return true;
-    }
-  }
-
-  // Obter status da sincronização
-  async getSyncStatus(userId: string): Promise<{
-    lastSync: Date | null;
-    nextSync: Date | null;
-    isRunning: boolean;
-    autoSync: boolean;
-    syncInterval: number;
-  }> {
-    try {
+      // Obter configuração de sincronização
       const syncConfig = await prisma.syncConfig.findFirst({
-        where: {
-          userId,
-          isActive: true,
-        },
+        where: { userId, isActive: true },
       });
 
       if (!syncConfig) {
-        return {
-          lastSync: null,
-          nextSync: null,
-          isRunning: false,
-          autoSync: false,
-          syncInterval: 30,
-        };
+        throw new Error('Configuração de sincronização não encontrada');
       }
 
-      const nextSync = syncConfig.lastSyncAt && syncConfig.autoSync
-        ? new Date(syncConfig.lastSyncAt.getTime() + (syncConfig.syncInterval * 60 * 1000))
-        : null;
+      // Inicializar serviço da API externa
+      const externalApiService = getExternalApiService({
+        baseUrl: syncConfig.apiEndpoint,
+        apiKey: syncConfig.apiKey,
+        timeout: 30000,
+      });
 
-      return {
-        lastSync: syncConfig.lastSyncAt,
-        nextSync,
-        isRunning: false, // Implementar lógica de verificação se está rodando
-        autoSync: syncConfig.autoSync,
-        syncInterval: syncConfig.syncInterval,
-      };
+      // Autenticar na API externa
+      const authResult = await externalApiService.authenticate({
+        email: credentials?.email || process.env.EXTERNAL_API_EMAIL || '',
+        password: credentials?.password || process.env.EXTERNAL_API_PASSWORD || '',
+      });
+
+      if (!authResult.success) {
+        throw new Error(`Falha na autenticação: ${authResult.error}`);
+      }
+
+      // Buscar respostas do formulário da API externa
+      // Nota: Esta funcionalidade precisaria ser implementada na API externa
+      // Por enquanto, vamos simular o processamento de respostas existentes
+      const responses = await prisma.formResponse.findMany({
+        where: {
+          formId,
+          submittedAt: {
+            gte: syncConfig.lastSyncAt || new Date(0),
+          },
+        },
+      });
+
+      result.syncedForms = 1;
+      result.processedResponses = responses.length;
+
+      // Processar automações para as respostas
+      const automationService = getAutomationService();
+      const automationResult = await automationService.processAllPendingResponses(formId);
+      
+      result.createdTasks = automationResult.createdTasks;
+      result.sentNotifications = automationResult.sentNotifications;
+      result.errors.push(...automationResult.errors);
+
+      // Atualizar última sincronização
+      await prisma.syncConfig.update({
+        where: { id: syncConfig.id },
+        data: { lastSyncAt: new Date() },
+      });
+
+      result.duration = Date.now() - startTime;
+      result.success = result.errors.length === 0;
+
     } catch (error) {
-      console.error('Erro ao obter status de sincronização:', error);
-      return {
-        lastSync: null,
-        nextSync: null,
-        isRunning: false,
-        autoSync: false,
-        syncInterval: 30,
-      };
+      result.success = false;
+      result.duration = Date.now() - startTime;
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
+      result.errors.push(errorMessage);
     }
+
+    return result;
+  }
+
+  /**
+   * Obtém o status da sincronização
+   */
+  async getSyncStatus(userId: string): Promise<{
+    isActive: boolean;
+    lastSync: Date | null;
+    nextSync: Date | null;
+    totalForms: number;
+    totalRules: number;
+    activeRules: number;
+  }> {
+    const syncConfig = await prisma.syncConfig.findFirst({
+      where: { userId, isActive: true },
+    });
+
+    const [totalForms, totalRules, activeRules] = await Promise.all([
+      prisma.form.count({ where: { userId } }),
+      prisma.automationRule.count(),
+      prisma.automationRule.count({ where: { isActive: true } }),
+    ]);
+
+    return {
+      isActive: !!syncConfig,
+      lastSync: syncConfig?.lastSyncAt || null,
+      nextSync: syncConfig?.lastSyncAt ? 
+        new Date(syncConfig.lastSyncAt.getTime() + (syncConfig.syncInterval * 60 * 1000)) : 
+        null,
+      totalForms,
+      totalRules,
+      activeRules,
+    };
   }
 }
 
-// Função utilitária para criar instância do serviço
-export function createSyncService(externalApi: ExternalApiService): SyncService {
-  return new SyncService(externalApi);
+// Instância singleton do serviço
+let syncService: SyncService | null = null;
+
+export function getSyncService(): SyncService {
+  if (!syncService) {
+    syncService = new SyncService();
+  }
+  return syncService;
 }

@@ -1,5 +1,5 @@
 import { Request } from 'express';
-import { User, SyncConfig, Form, Task, Notification } from '@prisma/client';
+import { User, SyncConfig, Form, Task, Notification, Sector, SLA, AutomationRule, AutomationExecution, AutomationStatus, TaskPriority, NotificationType } from '@prisma/client';
 
 // Tipos de resposta da API
 export interface ApiResponse<T = any> {
@@ -209,4 +209,120 @@ export interface ValidationError {
 export interface ValidationResult {
   isValid: boolean;
   errors: ValidationError[];
+}
+
+// Tipos de automação
+export interface AutomationCondition {
+  field: string;
+  operator: 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'greater_than' | 'less_than' | 'in' | 'not_in';
+  value: any;
+  logicalOperator?: 'AND' | 'OR';
+}
+
+export interface AutomationAction {
+  type: 'CREATE_TASK' | 'SEND_NOTIFICATION' | 'UPDATE_STATUS' | 'ASSIGN_SECTOR';
+  config: {
+    title?: string;
+    description?: string;
+    priority?: TaskPriority;
+    sectorId?: string;
+    slaId?: string;
+    notificationTitle?: string;
+    notificationMessage?: string;
+    notificationType?: NotificationType;
+  };
+}
+
+export interface AutomationRuleRequest {
+  name: string;
+  description?: string;
+  isActive?: boolean;
+  formId?: string;
+  sectorId?: string;
+  slaId?: string;
+  conditions: AutomationCondition[];
+  actions: AutomationAction[];
+  priority?: number;
+}
+
+export interface AutomationRuleResponse extends AutomationRule {
+  form?: {
+    id: string;
+    externalId: string;
+    title: string;
+    status: string;
+  } | null;
+  sector?: {
+    id: string;
+    name: string;
+    description: string | null;
+  } | null;
+  sla?: {
+    id: string;
+    name: string;
+    duration: number;
+    priority: TaskPriority;
+  } | null;
+}
+
+export interface SectorRequest {
+  name: string;
+  description?: string;
+  isActive?: boolean;
+}
+
+export interface SectorResponse extends Sector {
+  tasksCount?: number;
+  automationRulesCount?: number;
+}
+
+export interface SLARequest {
+  name: string;
+  description?: string;
+  duration: number;
+  priority: TaskPriority;
+  isActive?: boolean;
+}
+
+export interface SLAResponse extends SLA {
+  automationRulesCount?: number;
+}
+
+export interface AutomationExecutionResponse extends AutomationExecution {
+  rule: {
+    id: string;
+    name: string;
+  };
+  form: {
+    id: string;
+    title: string;
+  };
+  response: {
+    id: string;
+    submittedAt: Date;
+  };
+}
+
+export interface AutomationProcessRequest {
+  formId: string;
+  responseId: string;
+  forceExecution?: boolean;
+}
+
+export interface AutomationProcessResponse {
+  success: boolean;
+  executedRules: number;
+  createdTasks: number;
+  sentNotifications: number;
+  errors: string[];
+  executions: AutomationExecutionResponse[];
+}
+
+export interface AutomationStatusResponse {
+  isActive: boolean;
+  totalRules: number;
+  activeRules: number;
+  lastExecution: Date | null;
+  nextExecution: Date | null;
+  recentExecutions: AutomationExecutionResponse[];
 }

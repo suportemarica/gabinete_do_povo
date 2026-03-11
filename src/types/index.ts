@@ -18,8 +18,8 @@ export interface TaskRule {
   id: string;
   name: string;
   description: string;
-  questionId: string;
-  triggerValue: string | string[];
+  formId: string; // ID do formulário associado
+  conditions: AutomationCondition[]; // Múltiplas condições com operadores lógicos
   action: TaskAction;
   sla: {
     startOffset: number; // hours
@@ -27,6 +27,17 @@ export interface TaskRule {
   };
   sector: string;
   priority: 'low' | 'medium' | 'high' | 'urgent';
+  logicalOperator: 'AND' | 'OR'; // Operador lógico para combinar condições
+}
+
+export interface AutomationCondition {
+  id: string;
+  questionId: string;
+  questionText: string;
+  operator: 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'greater_than' | 'less_than' | 'in' | 'not_in';
+  value: string | string[];
+  questionType: 'text' | 'select' | 'multiselect' | 'date' | 'boolean';
+  questionOptions?: string[]; // Opções disponíveis para perguntas de seleção
 }
 
 export interface TaskAction {

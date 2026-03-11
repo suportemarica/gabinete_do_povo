@@ -88,49 +88,99 @@ export function useGabineteData() {
     const newTasks: Task[] = [];
     
     responses.forEach(response => {
-      const matchingRules = taskRules.filter(rule => 
-        rule.questionId === response.questionId &&
-        (Array.isArray(rule.triggerValue) 
-          ? rule.triggerValue.includes(response.answer as string)
-          : rule.triggerValue === response.answer
-        )
-      );
+      // Encontrar regras que correspondem ao formulário da resposta
+      const formRules = taskRules.filter(rule => rule.formId === response.formId);
+      
+      formRules.forEach(rule => {
+        // Verificar se todas as condições da regra são atendidas
+        const conditionsMet = rule.conditions.every(condition => {
+          const answerValue = response.answer;
+          
+          switch (condition.operator) {
+            case 'equals':
+              return answerValue === condition.value;
+            case 'not_equals':
+              return answerValue !== condition.value;
+            case 'contains':
+              return String(answerValue).toLowerCase().includes(String(condition.value).toLowerCase());
+            case 'not_contains':
+              return !String(answerValue).toLowerCase().includes(String(condition.value).toLowerCase());
+            case 'greater_than':
+              return Number(answerValue) > Number(condition.value);
+            case 'less_than':
+              return Number(answerValue) < Number(condition.value);
+            case 'in':
+              return Array.isArray(condition.value) ? condition.value.includes(answerValue) : false;
+            case 'not_in':
+              return Array.isArray(condition.value) ? !condition.value.includes(answerValue) : true;
+            default:
+              return false;
+          }
+        });
 
-      matchingRules.forEach(rule => {
-        const now = new Date();
-        const startDate = new Date(now.getTime() + rule.sla.startOffset * 60 * 60 * 1000);
-        const dueDate = new Date(startDate.getTime() + rule.sla.duration * 60 * 60 * 1000);
+        // Se a regra usa OR, verificar se pelo menos uma condição é atendida
+        const shouldExecute = rule.logicalOperator === 'OR' 
+          ? rule.conditions.some(condition => {
+              const answerValue = response.answer;
+              switch (condition.operator) {
+                case 'equals':
+                  return answerValue === condition.value;
+                case 'not_equals':
+                  return answerValue !== condition.value;
+                case 'contains':
+                  return String(answerValue).toLowerCase().includes(String(condition.value).toLowerCase());
+                case 'not_contains':
+                  return !String(answerValue).toLowerCase().includes(String(condition.value).toLowerCase());
+                case 'greater_than':
+                  return Number(answerValue) > Number(condition.value);
+                case 'less_than':
+                  return Number(answerValue) < Number(condition.value);
+                case 'in':
+                  return Array.isArray(condition.value) ? condition.value.includes(answerValue) : false;
+                case 'not_in':
+                  return Array.isArray(condition.value) ? !condition.value.includes(answerValue) : true;
+                default:
+                  return false;
+              }
+            })
+          : conditionsMet;
 
-        const newTask: Task = {
-          id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          title: rule.action.title,
-          description: rule.action.description,
-          status: 'pending',
-          priority: rule.priority,
-          sector: rule.sector,
-          createdAt: now.toISOString(),
-          startDate: startDate.toISOString(),
-          dueDate: dueDate.toISOString(),
-          formResponseId: response.id,
-          ruleId: rule.id,
-          relatedResponses: [response],
-        };
+        if (shouldExecute) {
+          const now = new Date();
+          const startDate = new Date(now.getTime() + rule.sla.startOffset * 60 * 60 * 1000);
+          const dueDate = new Date(startDate.getTime() + rule.sla.duration * 60 * 60 * 1000);
 
-        newTasks.push(newTask);
+          const newTask: Task = {
+            id: `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            title: rule.action.title,
+            description: rule.action.description,
+            status: 'pending',
+            priority: rule.priority,
+            sector: rule.sector,
+            createdAt: now.toISOString(),
+            startDate: startDate.toISOString(),
+            dueDate: dueDate.toISOString(),
+            formResponseId: response.id,
+            ruleId: rule.id,
+            relatedResponses: [response],
+          };
 
-        // Create notification
-        const notification: Notification = {
-          id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-          type: 'task_created',
-          title: 'Nova Tarefa Criada',
-          message: `Tarefa "${newTask.title}" foi criada automaticamente`,
-          timestamp: now.toISOString(),
-          read: false,
-          taskId: newTask.id,
-          severity: 'info',
-        };
+          newTasks.push(newTask);
 
-        setNotifications(prev => [notification, ...prev]);
+          // Create notification
+          const notification: Notification = {
+            id: `notif_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            type: 'task_created',
+            title: 'Nova Tarefa Criada',
+            message: `Tarefa "${newTask.title}" foi criada automaticamente`,
+            timestamp: now.toISOString(),
+            read: false,
+            taskId: newTask.id,
+            severity: 'info',
+          };
+
+          setNotifications(prev => [notification, ...prev]);
+        }
       });
     });
 

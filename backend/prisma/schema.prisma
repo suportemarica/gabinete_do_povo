@@ -64,6 +64,8 @@ model Form {
   questions FormQuestion[]
   responses FormResponse[]
   tasks    Task[]
+  automationRules AutomationRule[]
+  automationExecutions AutomationExecution[]
 
   @@map("forms")
 }
@@ -99,6 +101,7 @@ model FormResponse {
 
   // Relacionamentos
   form Form @relation(fields: [formId], references: [id], onDelete: Cascade)
+  automationExecutions AutomationExecution[]
 
   @@map("form_responses")
 }
@@ -113,12 +116,14 @@ model Task {
   dueDate     DateTime?
   completedAt DateTime?
   userId      String
+  sectorId    String?
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 
   // Relacionamentos
-  form Form? @relation(fields: [formId], references: [id], onDelete: SetNull)
-  user User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  form   Form?   @relation(fields: [formId], references: [id], onDelete: SetNull)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sector Sector? @relation(fields: [sectorId], references: [id], onDelete: SetNull)
 
   @@map("tasks")
 }
@@ -137,6 +142,79 @@ model Notification {
   user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("notifications")
+}
+
+model Sector {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relacionamentos
+  tasks           Task[]
+  automationRules AutomationRule[]
+
+  @@map("sectors")
+}
+
+model SLA {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  duration    Int      // Duração em horas
+  priority    TaskPriority
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relacionamentos
+  automationRules AutomationRule[]
+
+  @@map("slas")
+}
+
+model AutomationRule {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isActive    Boolean  @default(true)
+  formId      String?
+  sectorId    String?
+  slaId       String?
+  conditions  Json     // Condições para ativação da regra
+  actions     Json     // Ações a serem executadas
+  priority    Int      @default(0) // Prioridade da regra (maior = mais prioritária)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relacionamentos
+  form   Form?   @relation(fields: [formId], references: [id], onDelete: Cascade)
+  sector Sector? @relation(fields: [sectorId], references: [id], onDelete: SetNull)
+  sla    SLA?    @relation(fields: [slaId], references: [id], onDelete: SetNull)
+  executions AutomationExecution[]
+
+  @@map("automation_rules")
+}
+
+model AutomationExecution {
+  id          String   @id @default(cuid())
+  ruleId      String
+  formId      String
+  responseId  String
+  status      AutomationStatus
+  result      Json?    // Resultado da execução
+  error       String?
+  executedAt  DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  // Relacionamentos
+  rule     AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  form     Form           @relation(fields: [formId], references: [id], onDelete: Cascade)
+  response FormResponse   @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@map("automation_executions")
 }
 
 // Enums
@@ -188,5 +266,13 @@ enum NotificationType {
   WARNING
   ERROR
   SUCCESS
+}
+
+enum AutomationStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+  SKIPPED
 }
 

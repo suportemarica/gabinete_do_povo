@@ -13,6 +13,8 @@ import syncRoutes from './routes/sync';
 import formsRoutes from './routes/forms';
 import tasksRoutes from './routes/tasks';
 import notificationsRoutes from './routes/notifications';
+import automationRoutes from './routes/automation';
+import sectorsRoutes from './routes/sectors';
 
 // Importar middleware
 import { errorHandler } from './middleware/errorHandler';
@@ -70,6 +72,8 @@ app.use('/api/sync', authMiddleware, syncRoutes);
 app.use('/api/forms', authMiddleware, formsRoutes);
 app.use('/api/tasks', authMiddleware, tasksRoutes);
 app.use('/api/notifications', authMiddleware, notificationsRoutes);
+app.use('/api/automation', authMiddleware, automationRoutes);
+app.use('/api/sectors', authMiddleware, sectorsRoutes);
 
 // Rota de fallback
 app.use('*', (req, res) => {

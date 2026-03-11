@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Plus, Search, Filter, MoreHorizontal, Eye, Edit, Trash2, Users, Building, UserPlus, UserMinus } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Plus, Search, Filter, MoreHorizontal, Eye, Edit, Trash2, Users, Building, UserPlus, UserMinus, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -10,12 +10,14 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
-import { useGabineteData } from '@/hooks/useGabineteData';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useSectors } from '@/hooks/useSectors';
 import { Sector } from '@/types';
 import { SectorViewer } from '@/components/sectors/SectorViewer';
+import { useToast } from '@/hooks/use-toast';
 
 export function Sectors() {
-  const { sectors, setSectors } = useGabineteData();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSector, setSelectedSector] = useState<Sector | null>(null);
   const [isSectorDialogOpen, setIsSectorDialogOpen] = useState(false);
@@ -28,14 +30,35 @@ export function Sectors() {
     active: true,
   });
   const [newUser, setNewUser] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isActiveFilter, setIsActiveFilter] = useState<boolean | undefined>(undefined);
 
-  const filteredSectors = sectors.filter(sector =>
-    sector.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    sector.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    sector.responsibleUsers.some(user => 
-      user.toLowerCase().includes(searchTerm.toLowerCase())
-    )
-  );
+  // Hook para gerenciar setores com API
+  const {
+    sectors,
+    loading,
+    error,
+    pagination,
+    createSector,
+    updateSector,
+    deleteSector,
+    toggleSectorStatus,
+    refreshSectors,
+  } = useSectors({
+    page: currentPage,
+    limit: 10,
+    search: searchTerm || undefined,
+    isActive: isActiveFilter,
+  });
+
+  // Buscar setores quando o termo de busca mudar
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setCurrentPage(1);
+    }, 500); // Debounce de 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm]);
 
   const handleCreateSector = () => {
     setFormData({
@@ -65,40 +88,89 @@ export function Sectors() {
     setIsSectorViewerOpen(true);
   };
 
-  const handleSaveSector = () => {
-    if (!formData.name.trim()) return;
-
-    const sectorData: Sector = {
-      id: isEditing && selectedSector ? selectedSector.id : `setor_${Date.now()}`,
-      name: formData.name,
-      description: formData.description,
-      responsibleUsers: formData.responsibleUsers,
-      active: formData.active,
-    };
-
-    if (isEditing && selectedSector) {
-      setSectors(prev => prev.map(s => s.id === selectedSector.id ? sectorData : s));
-    } else {
-      setSectors(prev => [...prev, sectorData]);
+  const handleSaveSector = async () => {
+    if (!formData.name.trim()) {
+      toast({
+        title: "Erro",
+        description: "Nome do setor é obrigatório",
+        variant: "destructive",
+      });
+      return;
     }
 
-    setIsSectorDialogOpen(false);
-    setFormData({
-      name: '',
-      description: '',
-      responsibleUsers: [],
-      active: true,
-    });
+    try {
+      const sectorData = {
+        name: formData.name,
+        description: formData.description,
+        isActive: formData.active,
+      };
+
+      if (isEditing && selectedSector) {
+        const updatedSector = await updateSector(selectedSector.id, sectorData);
+        if (updatedSector) {
+          toast({
+            title: "Sucesso",
+            description: "Setor atualizado com sucesso",
+          });
+        }
+      } else {
+        const newSector = await createSector(sectorData);
+        if (newSector) {
+          toast({
+            title: "Sucesso",
+            description: "Setor criado com sucesso",
+          });
+        }
+      }
+
+      setIsSectorDialogOpen(false);
+      setFormData({
+        name: '',
+        description: '',
+        responsibleUsers: [],
+        active: true,
+      });
+    } catch (error) {
+      toast({
+        title: "Erro",
+        description: "Erro ao salvar setor",
+        variant: "destructive",
+      });
+    }
   };
 
-  const handleDeleteSector = (sector: Sector) => {
-    setSectors(prev => prev.filter(s => s.id !== sector.id));
+  const handleDeleteSector = async (sector: Sector) => {
+    if (window.confirm(`Tem certeza que deseja deletar o setor "${sector.name}"?`)) {
+      const success = await deleteSector(sector.id);
+      if (success) {
+        toast({
+          title: "Sucesso",
+          description: "Setor deletado com sucesso",
+        });
+      } else {
+        toast({
+          title: "Erro",
+          description: "Erro ao deletar setor",
+          variant: "destructive",
+        });
+      }
+    }
   };
 
-  const handleToggleSector = (sector: Sector) => {
-    setSectors(prev => prev.map(s => 
-      s.id === sector.id ? { ...s, active: !s.active } : s
-    ));
+  const handleToggleSector = async (sector: Sector) => {
+    const updatedSector = await toggleSectorStatus(sector.id);
+    if (updatedSector) {
+      toast({
+        title: "Sucesso",
+        description: `Setor ${updatedSector.active ? 'ativado' : 'desativado'} com sucesso`,
+      });
+    } else {
+      toast({
+        title: "Erro",
+        description: "Erro ao alterar status do setor",
+        variant: "destructive",
+      });
+    }
   };
 
   const handleAddUser = () => {
@@ -135,11 +207,28 @@ export function Sectors() {
             Gerencie os setores responsáveis pelas tarefas do sistema
           </p>
         </div>
-        <Button onClick={handleCreateSector} className="bg-red-600 hover:bg-red-700">
-          <Plus className="h-4 w-4 mr-2" />
-          Novo Setor
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button 
+            onClick={refreshSectors} 
+            variant="outline" 
+            disabled={loading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Atualizar
+          </Button>
+          <Button onClick={handleCreateSector} className="bg-red-600 hover:bg-red-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Novo Setor
+          </Button>
+        </div>
       </div>
+
+      {/* Exibir erro se houver */}
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
 
       {/* Cards de estatísticas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -199,27 +288,58 @@ export function Sectors() {
                   className="pl-8 w-64"
                 />
               </div>
-              <Button variant="outline" size="sm">
-                <Filter className="h-4 w-4 mr-2" />
-                Filtros
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Filter className="h-4 w-4 mr-2" />
+                    Filtros
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setIsActiveFilter(undefined)}>
+                    Todos os setores
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsActiveFilter(true)}>
+                    Apenas ativos
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => setIsActiveFilter(false)}>
+                    Apenas inativos
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nome</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Responsáveis</TableHead>
-                <TableHead>Usuários</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredSectors.map((sector) => (
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <div className="flex items-center gap-2">
+                <RefreshCw className="h-4 w-4 animate-spin" />
+                <span>Carregando setores...</span>
+              </div>
+            </div>
+          ) : (
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Nome</TableHead>
+                    <TableHead>Descrição</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Responsáveis</TableHead>
+                    <TableHead>Usuários</TableHead>
+                    <TableHead className="text-right">Ações</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {sectors.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center py-8 text-muted-foreground">
+                        Nenhum setor encontrado
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    sectors.map((sector) => (
                 <TableRow key={sector.id}>
                   <TableCell className="font-medium">{sector.name}</TableCell>
                   <TableCell className="text-muted-foreground">
@@ -289,9 +409,42 @@ export function Sectors() {
                     </DropdownMenu>
                   </TableCell>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+
+              {/* Paginação */}
+              {pagination && pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between mt-4">
+                  <div className="text-sm text-muted-foreground">
+                    Mostrando {((pagination.page - 1) * pagination.limit) + 1} a {Math.min(pagination.page * pagination.limit, pagination.total)} de {pagination.total} setores
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                      disabled={currentPage === 1 || loading}
+                    >
+                      Anterior
+                    </Button>
+                    <span className="text-sm">
+                      Página {currentPage} de {pagination.totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPage(prev => Math.min(pagination.totalPages, prev + 1))}
+                      disabled={currentPage === pagination.totalPages || loading}
+                    >
+                      Próxima
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

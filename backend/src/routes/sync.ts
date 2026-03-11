@@ -4,7 +4,7 @@ import { prisma } from '../index';
 import { ApiResponse } from '../types';
 import { User } from '@prisma/client';
 import { initializeExternalApiService, getExternalApiService } from '../services/externalApiService';
-import { createSyncService } from '../services/syncService';
+import { getSyncService } from '../services/syncService';
 
 // Tipo para requisições autenticadas
 interface AuthenticatedRequest extends Request {
@@ -49,28 +49,23 @@ router.post('/forms', async (req: AuthenticatedRequest, res: Response) => {
       timeout: 30000,
     });
 
-    // Criar serviço de sincronização
-    const syncService = createSyncService(externalApi);
+    // Obter serviço de sincronização
+    const syncService = getSyncService();
 
     // Executar sincronização
-    const syncResult = await syncService.syncForms({
-      userId,
-      credentials: { email, password },
-      apiEndpoint,
-      apiKey,
-      forceSync,
-    });
+    const syncResult = await syncService.syncForms(userId, { email, password });
 
     if (syncResult.success) {
       console.log('✅ Sincronização concluída com sucesso');
       console.log(`📊 Formulários sincronizados: ${syncResult.syncedForms}`);
-      console.log(`📝 Perguntas sincronizadas: ${syncResult.syncedQuestions}`);
+      console.log(`📝 Tarefas criadas: ${syncResult.createdTasks}`);
+      console.log(`🔔 Notificações enviadas: ${syncResult.sentNotifications}`);
       console.log(`⏱️ Duração: ${syncResult.duration}ms`);
 
       const response: ApiResponse<typeof syncResult> = {
         success: true,
         data: syncResult,
-        message: `Sincronização concluída: ${syncResult.syncedForms} formulários e ${syncResult.syncedQuestions} perguntas sincronizados`,
+        message: `Sincronização concluída: ${syncResult.syncedForms} formulários, ${syncResult.createdTasks} tarefas criadas, ${syncResult.sentNotifications} notificações enviadas`,
       };
 
       res.json(response);

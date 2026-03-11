@@ -93,6 +93,13 @@ class ApiService {
         throw new Error('Token expirado. Faça login novamente.');
       }
       
+      // Se for erro 429 (Rate Limiting), retornar erro específico
+      if (response.status === 429) {
+        const retryAfter = response.headers.get('Retry-After');
+        const retryAfterSeconds = retryAfter ? parseInt(retryAfter) : 60;
+        throw new Error(`Muitas tentativas de login. Tente novamente em ${retryAfterSeconds} segundos.`);
+      }
+      
       throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
     }
 
@@ -105,6 +112,36 @@ class ApiService {
     if (!this.tokenExpiry) return false;
     const fiveMinutes = 5 * 60 * 1000; // 5 minutos em millisegundos
     return Date.now() >= (this.tokenExpiry - fiveMinutes);
+  }
+
+  // Lógica de retry com backoff exponencial
+  private async retryWithBackoff<T>(
+    operation: () => Promise<T>,
+    maxRetries: number = 3,
+    baseDelay: number = 1000
+  ): Promise<T> {
+    let lastError: Error | null = null;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error as Error;
+        
+        // Se não for erro 429 ou se esgotaram as tentativas, não retry
+        if (!lastError.message.includes('Muitas tentativas') || attempt === maxRetries) {
+          throw lastError;
+        }
+        
+        // Calcular delay com backoff exponencial
+        const delay = baseDelay * Math.pow(2, attempt);
+        console.log(`⏳ Tentativa ${attempt + 1} falhou, aguardando ${delay}ms antes de tentar novamente...`);
+        
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+    
+    throw lastError!;
   }
 
   // Renovar token se necessário
@@ -139,25 +176,27 @@ class ApiService {
     console.log('🔐 Tentando fazer login com:', credentials);
     console.log('🌐 URL da API:', `${API_BASE_URL}/auth/login`);
     
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(credentials),
+    return this.retryWithBackoff(async () => {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(credentials),
+      });
+
+      console.log('📡 Resposta da API:', response.status, response.statusText);
+      console.log('📋 Headers da resposta:', Object.fromEntries(response.headers.entries()));
+
+      const result = await this.handleResponse<LoginResponse>(response);
+      
+      if (result.success && result.data?.token) {
+        // Armazenar token com tempo de expiração
+        this.setToken(result.data.token, result.data.expiresIn);
+      }
+
+      return result;
     });
-
-    console.log('📡 Resposta da API:', response.status, response.statusText);
-    console.log('📋 Headers da resposta:', Object.fromEntries(response.headers.entries()));
-
-    const result = await this.handleResponse<LoginResponse>(response);
-    
-    if (result.success && result.data?.token) {
-      // Armazenar token com tempo de expiração
-      this.setToken(result.data.token, result.data.expiresIn);
-    }
-
-    return result;
   }
 
   async register(userData: RegisterRequest): Promise<ApiResponse<LoginResponse>> {
@@ -429,6 +468,235 @@ class ApiService {
     });
 
     return this.handleResponse<PaginatedResponse<ApiForm>>(response);
+  }
+
+  // ===== AUTOMAÇÃO =====
+
+  // Regras de Automação
+  async getAutomationRules(filters: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    isActive?: boolean;
+    formId?: string;
+  } = {}): Promise<ApiResponse<PaginatedResponse<any>>> {
+    await this.refreshTokenIfNeeded();
+    
+    const params = new URLSearchParams();
+    if (filters.page) params.append('page', filters.page.toString());
+    if (filters.limit) params.append('limit', filters.limit.toString());
+    if (filters.search) params.append('search', filters.search);
+    if (filters.isActive !== undefined) params.append('isActive', filters.isActive.toString());
+    if (filters.formId) params.append('formId', filters.formId);
+
+    const response = await fetch(`${API_BASE_URL}/automation/rules?${params.toString()}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<PaginatedResponse<any>>(response);
+  }
+
+  async getAutomationRule(id: string): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/rules/${id}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async createAutomationRule(ruleData: any): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/rules`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(ruleData),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async updateAutomationRule(id: string, ruleData: any): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/rules/${id}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(ruleData),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async deleteAutomationRule(id: string): Promise<ApiResponse<void>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/rules/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<void>(response);
+  }
+
+  // Setores
+  async getSectors(filters: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    isActive?: boolean;
+  } = {}): Promise<ApiResponse<PaginatedResponse<any>>> {
+    await this.refreshTokenIfNeeded();
+    
+    const params = new URLSearchParams();
+    if (filters.page) params.append('page', filters.page.toString());
+    if (filters.limit) params.append('limit', filters.limit.toString());
+    if (filters.search) params.append('search', filters.search);
+    if (filters.isActive !== undefined) params.append('isActive', filters.isActive.toString());
+
+    const response = await fetch(`${API_BASE_URL}/sectors?${params.toString()}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<PaginatedResponse<any>>(response);
+  }
+
+  async getSector(id: string): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/sectors/${id}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async createSector(sectorData: { name: string; description?: string; isActive?: boolean }): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/sectors`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(sectorData),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async updateSector(id: string, sectorData: { name?: string; description?: string; isActive?: boolean }): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/sectors/${id}`, {
+      method: 'PUT',
+      headers: this.getHeaders(),
+      body: JSON.stringify(sectorData),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async deleteSector(id: string): Promise<ApiResponse<void>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/sectors/${id}`, {
+      method: 'DELETE',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<void>(response);
+  }
+
+  async toggleSectorStatus(id: string): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/sectors/${id}/toggle`, {
+      method: 'PATCH',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  // SLAs
+  async getSLAs(filters: {
+    page?: number;
+    limit?: number;
+    search?: string;
+    isActive?: boolean;
+  } = {}): Promise<ApiResponse<PaginatedResponse<any>>> {
+    await this.refreshTokenIfNeeded();
+    
+    const params = new URLSearchParams();
+    if (filters.page) params.append('page', filters.page.toString());
+    if (filters.limit) params.append('limit', filters.limit.toString());
+    if (filters.search) params.append('search', filters.search);
+    if (filters.isActive !== undefined) params.append('isActive', filters.isActive.toString());
+
+    const response = await fetch(`${API_BASE_URL}/automation/slas?${params.toString()}`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<PaginatedResponse<any>>(response);
+  }
+
+  async createSLA(slaData: {
+    name: string;
+    description?: string;
+    duration: number;
+    priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT';
+    isActive?: boolean;
+  }): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/slas`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify(slaData),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  // Processamento de Automação
+  async processAutomation(formId: string, responseId: string, forceExecution?: boolean): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/process`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      body: JSON.stringify({ formId, responseId, forceExecution }),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async processAllAutomation(formId: string): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/process-all/${formId}`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
+  }
+
+  async getAutomationStatus(): Promise<ApiResponse<any>> {
+    await this.refreshTokenIfNeeded();
+    
+    const response = await fetch(`${API_BASE_URL}/automation/status`, {
+      method: 'GET',
+      headers: this.getHeaders(),
+    });
+
+    return this.handleResponse<any>(response);
   }
 
   // Utilitários

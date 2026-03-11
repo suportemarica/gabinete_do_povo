@@ -11,7 +11,9 @@
     "migrate:deploy": "npx prisma migrate deploy",
     "generate": "npx prisma generate",
     "studio": "npx prisma studio",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "seed:automation": "tsx src/seed-automation.ts",
+    "reset-rate-limit": "node scripts/reset-rate-limit.js"
   },
   "keywords": [
     "gabinete",
